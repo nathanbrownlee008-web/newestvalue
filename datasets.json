@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Value Bets",
+    "slug": "value-bets",
+    "file": "value-bets.json"
+  },
+  {
+    "name": "Bet History",
+    "slug": "bet-history",
+    "file": "bet-history.json"
+  },
+  {
+    "name": "Betting Strategies",
+    "slug": "strategies",
+    "file": "strategies.json"
+  }
+]
