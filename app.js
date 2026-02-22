@@ -1,16 +1,6 @@
 
 const $ = (id) => document.getElementById(id);
 
-
-// 🔥 Bankroll Storage
-function getBankroll(){
-  const v = localStorage.getItem("starting_bankroll");
-  return v ? Number(v) : 1000;
-}
-function setBankroll(v){
-  localStorage.setItem("starting_bankroll", v);
-}
-
 const state = {
   datasets: [],
   current: null,
@@ -93,12 +83,6 @@ function buildHead(){
   const thead = $("tbl").querySelector("thead");
   thead.innerHTML = "";
   const tr = document.createElement("tr");
-
-    if (state.current.slug === "value-bets" && typeof r["Value %"] === "number") {
-      if (r["Value %"] > 20) tr.classList.add("value-high");
-      else if (r["Value %"] > 10) tr.classList.add("value-mid");
-      else if (r["Value %"] < 0) tr.classList.add("value-neg");
-    }
   state.columns.forEach(key=>{
     const th = document.createElement("th");
     const arrow = (state.sortKey === key) ? (state.sortDir === "asc" ? " ▲" : " ▼") : "";
@@ -179,12 +163,6 @@ function buildBody(){
   tbody.innerHTML = "";
   state.filtered.forEach(r=>{
     const tr = document.createElement("tr");
-
-    if (state.current.slug === "value-bets" && typeof r["Value %"] === "number") {
-      if (r["Value %"] > 20) tr.classList.add("value-high");
-      else if (r["Value %"] > 10) tr.classList.add("value-mid");
-      else if (r["Value %"] < 0) tr.classList.add("value-neg");
-    }
     tr.addEventListener("click", ()=> openDetails(r));
     state.columns.forEach(key=>{
       const td = document.createElement("td");
@@ -263,6 +241,17 @@ function buildCards(){
 
     item.appendChild(top);
     item.appendChild(grid);
+
+    // ADD TO HISTORY BUTTON
+    const btn = document.createElement("button");
+    btn.className = "addHistoryBtn";
+    btn.textContent = "Add to History";
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      addToHistory(r);
+    });
+    item.appendChild(btn);
+
     list.appendChild(item);
   });
 }
@@ -314,139 +303,46 @@ function initFilters(){
   $("pminLabel").textContent = pCol ? `Min ${pCol}` : "Min probability";
 }
 
+
 async function loadDataset(slug){
   const ds = state.datasets.find(d=>d.slug===slug) || state.datasets[0];
   state.current = ds;
   $("status").textContent = "Loading…";
   buildTabs();
 
+  // LOAD BET HISTORY FROM LOCAL STORAGE
+  if (ds.slug === "bet-history") {
+    const history = JSON.parse(localStorage.getItem("betHistory") || "[]");
+
+    state.raw = history;
+    state.columnsAll = history.length ? Object.keys(history[0]) : [];
+    state.columns = state.columnsAll.slice(0, 8);
+    state.sortKey = state.columns[0] || null;
+    state.sortDir = "asc";
+
+    initFilters();
+    $("status").textContent = "Local history data";
+    render();
+    return;
+  }
+
+  // NORMAL DATASETS
   const res = await fetch(ds.file, {cache:"no-store"});
   const json = await res.json();
   state.raw = json.rows || [];
   state.columnsAll = json.columns || (state.raw.length ? Object.keys(state.raw[0]) : []);
-
-  if (state.current.slug === "value-bets") {
-
-  const localVB = getData("value_bets_data");
-  if(localVB.length){
-    state.raw = localVB;
-    state.columnsAll = Object.keys(localVB[0] || {});
-  }
-  } else if (state.current.slug === "bet-history") {
-  // Load from localStorage if exists
-  const localHistory = getHistory();
-  if(localHistory.length){
-    state.raw = localHistory;
-    state.columnsAll = Object.keys(localHistory[0] || {});
-  }
-
-
-    let bank = getBankroll();
-    let totalStake = 0;
-    let totalProfit = 0;
-    let wins = 0;
-    let losses = 0;
-
-    state.raw = state.raw.map(r => {
-      const odds = Number(r["Odds Taken"]);
-      const stake = Number(r["Stake"]);
-      const result = (r["Result"] || "").toLowerCase();
-
-      let profit = 0;
-
-      if(result === "win"){
-        profit = stake * (odds - 1);
-        wins++;
-      } else if(result === "loss"){
-        profit = -stake;
-        losses++;
-      }
-
-      totalStake += stake || 0;
-      totalProfit += profit;
-      bank += profit;
-
-      r["Profit"] = profit;
-      r["Running Bank"] = bank;
-
-      return r;
-    });
-
-    const roi = totalStake ? (totalProfit / totalStake) * 100 : 0;
-    const strike = (wins + losses) ? (wins / (wins + losses)) * 100 : 0;
-
-    // Inject summary row
-    state.raw.push({
-      "Date": "—",
-      "League": "SUMMARY",
-      "Fixture": "",
-      "Market": "",
-      "Odds Taken": "",
-      "Stake": totalStake,
-      "Result": "",
-      "Profit": totalProfit,
-      "Running Bank": bank,
-      "ROI %": roi.toFixed(2),
-      "Strike %": strike.toFixed(2)
-    });
-
-    if (!state.columnsAll.includes("Running Bank")) state.columnsAll.push("Running Bank");
-    if (!state.columnsAll.includes("ROI %")) state.columnsAll.push("ROI %");
-    if (!state.columnsAll.includes("Strike %")) state.columnsAll.push("Strike %");
-
-    state.columns = state.columnsAll;
-    state.sortKey = null;
-    state.sortDir = "asc";
-
-
-    state.raw = state.raw.map(r => {
-      const p = Number(r["Model Probability"]);
-      const odds = Number(r["Bookmaker Odds"]);
-
-      if (p && odds) {
-        r["Fair Odds"] = 1 / p;
-        r["Implied Probability"] = 1 / odds;
-        r["Value %"] = (p - (1 / odds)) * 100;
-      }
-
-      return r;
-    });
-
-    ["Fair Odds","Implied Probability","Value %"].forEach(c => {
-      if (!state.columnsAll.includes(c)) state.columnsAll.push(c);
-    });
-
-    state.columns = inferPrimaryCols(state.columnsAll);
-    state.sortKey = "Value %";
-    state.sortDir = "desc";
-
-  } else if (state.current.slug === "strategies") {
-
-  const localStrat = getData("strategies_data");
-  if(localStrat.length){
-    state.raw = localStrat;
-    state.columnsAll = Object.keys(localStrat[0] || {});
-  }
-
-  state.columns = state.columnsAll;
-  state.sortKey = null;
+  state.columns = inferPrimaryCols(state.columnsAll);
+  state.sortKey = state.columns[0] || null;
   state.sortDir = "asc";
 
-} else {
-
-    state.columns = inferPrimaryCols(state.columnsAll);
-    state.sortKey = state.columns[0] || null;
-    state.sortDir = "asc";
-
-  }
   initFilters();
   $("status").textContent = "Offline data (bundled).";
   render();
 }
 
+
 function render(){
   applyFilters();
-  calculateStrategyPerformance();
   buildHead();
   buildBody();
   buildCards();
@@ -473,7 +369,7 @@ function setCompact(on){
 }
 
 async function init(){
-  // Service worker removed for stabilitycatch(e){}
+  // Service worker removedcatch(e){}
   }
 
   // install prompt
@@ -491,8 +387,12 @@ async function init(){
     $("installBtn").classList.add("hidden");
   });
 
-  const dsRes = await fetch("datasets.json", {cache:"no-store"});
-  state.datasets = await dsRes.json();
+  // Hardcoded datasets (no external config)
+  state.datasets = [
+    { name: "Value Bets", slug: "value-bets", file: "value-bets.json" },
+    { name: "Bet History", slug: "bet-history", file: "bet-history.json" },
+    { name: "Betting Strategies", slug: "strategies", file: "strategies.json" }
+  ];
   buildTabs();
 
   // listeners
@@ -513,125 +413,12 @@ async function init(){
 
   await loadDataset(state.datasets[0]?.slug);
 }
-init();
 
-
-
-
-// 🔥 Bet History Local Storage
-function getHistory(){
-  const h = localStorage.getItem("bet_history_data");
-  return h ? JSON.parse(h) : [];
-}
-function saveHistory(rows){
-  localStorage.setItem("bet_history_data", JSON.stringify(rows));
-}
-
-// 🔥 Add to Bet History
 function addToHistory(row){
-  const history = getHistory();
-
-  history.push({
-    "Date": row["DateUTC (date)"] || "",
-    "League": row["League"] || "",
-    "Fixture": (row["Home"] && row["Away"]) ? row["Home"] + " vs " + row["Away"] : "",
-    "Market": row["Market"] || "",
-    "Odds Taken": row["Bookmaker Odds"] || "",
-    "Stake": "",
-    "Result": "",
-    "Profit": ""
-  });
-
-  saveHistory(history);
-  alert("Bet added to Bet History (saved locally).");
+  const history = JSON.parse(localStorage.getItem("betHistory") || "[]");
+  history.push(row);
+  localStorage.setItem("betHistory", JSON.stringify(history));
+  alert("Added to history");
 }
 
-
-// 🔥 Generic Local Storage Helpers
-function getData(key){
-  const d = localStorage.getItem(key);
-  return d ? JSON.parse(d) : [];
-}
-function saveData(key, rows){
-  localStorage.setItem(key, JSON.stringify(rows));
-}
-
-
-// 🔥 CSV Upload Utility
-function uploadCSV(type){
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".csv";
-  input.onchange = e => {
-    const file = e.target.files[0];
-    const reader = new FileReader();
-    reader.onload = evt => {
-      const text = evt.target.result;
-      const rows = text.split("\n").map(r=>r.split(","));
-      const headers = rows[0];
-      const data = rows.slice(1).filter(r=>r.length>1).map(r=>{
-        let obj={};
-        headers.forEach((h,i)=>obj[h.trim()]=r[i]?.trim());
-        return obj;
-      });
-      saveData(type, data);
-      alert("CSV imported.");
-      location.reload();
-    };
-    reader.readAsText(file);
-  };
-  input.click();
-}
-
-
-// 🔥 Strategy Performance Engine (Simple Mode A)
-function calculateStrategyPerformance(){
-  if(state.current.slug !== "strategies") return;
-
-  const history = getHistory();
-  if(!history.length) return;
-
-  state.raw = state.raw.map(strat => {
-
-    const minValue = Number(strat["Min Value %"] || 0);
-    const leagues = (strat["Leagues"] || "").split(",").map(l=>l.trim().toLowerCase()).filter(Boolean);
-
-    let totalStake = 0;
-    let totalProfit = 0;
-    let wins = 0;
-    let losses = 0;
-
-    history.forEach(bet => {
-      const leagueMatch = !leagues.length || leagues.includes((bet["League"] || "").toLowerCase());
-      const value = Number(bet["Value %"] || 0);
-
-      if(leagueMatch && value >= minValue){
-
-        const stake = Number(bet["Stake"] || 0);
-        const profit = Number(bet["Profit"] || 0);
-
-        totalStake += stake;
-        totalProfit += profit;
-
-        if(profit > 0) wins++;
-        if(profit < 0) losses++;
-      }
-    });
-
-    const roi = totalStake ? (totalProfit / totalStake) * 100 : 0;
-    const strike = (wins + losses) ? (wins / (wins + losses)) * 100 : 0;
-
-    strat["Total Stake"] = totalStake;
-    strat["Total Profit"] = totalProfit;
-    strat["ROI %"] = roi.toFixed(2);
-    strat["Strike %"] = strike.toFixed(2);
-
-    return strat;
-  });
-
-  ["Total Stake","Total Profit","ROI %","Strike %"].forEach(c=>{
-    if(!state.columnsAll.includes(c)) state.columnsAll.push(c);
-  });
-
-  state.columns = state.columnsAll;
-}
+init();
